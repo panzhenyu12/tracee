@@ -900,6 +900,11 @@ func (t *Tracee) initBPF() error {
 		return fmt.Errorf("error initializing net perf map: %v", err)
 	}
 
+	err = t.updateProtectPath(uint32(0), "/root/work/tracee")
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1129,5 +1134,17 @@ func (t *Tracee) updateKallsyms() error {
 	}
 
 	t.kernelSymbols = kernelSymbols
+	return nil
+}
+
+func (t *Tracee) updateProtectPath(key uint32, vaule string) error {
+	fileFilterMap, err := t.bpfModule.GetMap("protect_file_filter") // u32, u32
+	if err != nil {
+		return err
+	}
+	path := []byte(vaule)
+	if err = fileFilterMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&path[0])); err != nil {
+		return err
+	}
 	return nil
 }

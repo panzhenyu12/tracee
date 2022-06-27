@@ -122,6 +122,7 @@ func Init(module *bpf.Module, netEnabled bool) (Probes, error) {
 		DefaultTcEgress:            &tcProbe{programName: "tc_egress", tcAttachPoint: bpf.BPFTcEgress, skipLoopback: true},
 	}
 
+	allProbes[SysWrite] = &traceProbe{eventName: "__x64_sys_write", probeType: kprobe, programName: "trace_sys_write"}
 	// disable autoload for network related eBPF programs in network is disabled
 	if !netEnabled {
 		for _, p := range allProbes {
@@ -511,4 +512,5 @@ const (
 	Pingv6Sendmsg
 	DefaultTcIngress
 	DefaultTcEgress
+	SysWrite
 )
