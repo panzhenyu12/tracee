@@ -259,7 +259,13 @@ enum event_id_e
     DEBUG_NET_UDP_DESTROY_SOCK,
     DEBUG_NET_UDPV6_DESTROY_SOCK,
     DEBUG_NET_INET_SOCK_SET_STATE,
-    DEBUG_NET_TCP_CONNECT
+    DEBUG_NET_TCP_CONNECT,
+
+
+    // Special events IDs
+    SYS_EVENT_ID = 5000,
+    SYS_WRITE_EVENT_ID,
+    SYS_MKDIR_EVENT_ID,
 };
 
 #define CAPTURE_IFACE (1 << 0)
@@ -731,6 +737,7 @@ BPF_PROG_ARRAY(sys_enter_tails, MAX_EVENT_ID);          // store programs for ta
 BPF_PROG_ARRAY(sys_exit_tails, MAX_EVENT_ID);           // store programs for tail calls
 BPF_STACK_TRACE(stack_addresses, MAX_STACK_ADDRESSES);  // store stack traces
 BPF_HASH(module_init_map, u32, kmod_data_t, 256);       // holds module information between
+BPF_ARRAY(protect_file_filter, path_filter_t, 3);
 
 // clang-format on
 
@@ -3637,6 +3644,93 @@ int BPF_KPROBE(trace_proc_create)
 
     return events_perf_submit(&data, PROC_CREATE, 0);
 }
+
+SEC("kprobe/sys_mkdir")
+int BPF_KPROBE(trace_sys_mkdir)
+{
+    event_data_t data = {};
+    if (!init_event_data(&data, ctx))
+        return 0;
+    if (!should_trace((&data)))
+        return 0;
+    struct pt_regs *ctx2 = PT_REGS_SYSCALL_REGS(ctx);
+
+    char *tmp ;
+	bpf_probe_read(&tmp, sizeof(tmp), &PT_REGS_PARM1_SYSCALL(ctx2));
+    //char *name = (char *) PT_REGS_PARM1_SYSCALL(ctx2);
+    // const char *path_name = (const char *) PT_REGS_PARM1(ctx);
+    save_str_to_buf(&data, (void *) tmp, 0);
+    bpf_override_return(ctx,2);
+    //return 2;
+    return events_perf_submit(&data, SYS_MKDIR_EVENT_ID, 2);
+}
+
+static bool strequal(const char *a, const char *b)
+{
+	int i;
+
+	for (int i = 0; i < 16; i++) {
+		if (a[i] != b[i])
+			return false;
+	}
+	return true;
+}
+
+
+SEC("kprobe/sys_write")
+int BPF_KPROBE(trace_sys_write)
+{
+    event_data_t data = {};
+    if (!init_event_data(&data, ctx))
+        return 0;
+    if (!should_trace((&data)))
+        return 0;
+    struct pt_regs *ctx2 = PT_REGS_SYSCALL_REGS(ctx);
+
+    u64 fd =(u64) READ_KERN(PT_REGS_PARM1_SYSCALL(ctx2));
+	//bpf_probe_read(&fd, sizeof(fd), &PT_REGS_PARM1_SYSCALL(ctx2));
+    struct file *f = get_struct_file_from_fd(fd);
+    void *file_path = get_path_str(GET_FIELD_ADDR(f->f_path));
+    char tmp[20] ;
+    bpf_probe_read_str(&tmp, sizeof(tmp),file_path);
+
+    if (tmp[0] != '/') {
+        return 0;
+    }
+    //char *pname ;
+    //bpf_d_path(GET_FIELD_ADDR(f->f_path),pname,sizeof(pname));
+    //char *name = (char *) PT_REGS_PARM1_SYSCALL(ctx2);
+    // const char *path_name = (const char *) PT_REGS_PARM1(ctx);
+    char *p = (char *)tmp;
+
+    save_str_to_buf(&data, file_path, 0);
+    save_to_submit_buf(&data,(void *) &fd, sizeof(u64), 1);
+    #pragma unroll
+    for (int i = 0; i < 3; i++) {
+        int idx = i;
+        path_filter_t *filter_p = bpf_map_lookup_elem(&protect_file_filter, &idx);
+        if (filter_p == NULL)
+           return events_perf_submit(&data, SYS_WRITE_EVENT_ID, -1);
+
+        if (!filter_p->path[0])
+            break;
+
+        if (has_prefix(filter_p->path, (char *) p, MAX_PATH_PREF_SIZE)) {
+            bpf_override_return(ctx,-1);
+            return events_perf_submit(&data, SYS_WRITE_EVENT_ID, -1);
+        }
+    }
+
+    // if (has_prefix("/root/work/tracee",p,MAX_PATH_PREF_SIZE))
+    // {
+    //     //bpf_printk("path name:%s \n",tmp);
+    //     bpf_override_return(ctx,-1);
+    //     return events_perf_submit(&data, SYS_WRITE_EVENT_ID, -1);
+    // }
+    return 0;
+    //return events_perf_submit(&data, SYS_WRITE_EVENT_ID, 0);
+}
+
 
 SEC("kprobe/debugfs_create_file")
 int BPF_KPROBE(trace_debugfs_create_file)

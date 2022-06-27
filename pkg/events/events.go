@@ -184,6 +184,11 @@ const (
 )
 
 const (
+	SysEvent ID = iota + 5000
+	SysWrite
+)
+
+const (
 	CaptureIface int32 = 1 << iota
 	TraceIface
 )
@@ -201,17 +206,17 @@ var Definitions = eventDefinitions{
 				{Type: "size_t", Name: "count"},
 			},
 		},
-		Write: {
-			ID32Bit: sys32write,
-			Name:    "write",
-			Syscall: true,
-			Sets:    []string{"syscalls", "fs", "fs_read_write"},
-			Params: []trace.ArgMeta{
-				{Type: "int", Name: "fd"},
-				{Type: "void*", Name: "buf"},
-				{Type: "size_t", Name: "count"},
-			},
-		},
+		// Write: {
+		// 	ID32Bit: sys32write,
+		// 	Name:    "write",
+		// 	Syscall: true,
+		// 	Sets:    []string{"syscalls", "fs", "fs_read_write"},
+		// 	Params: []trace.ArgMeta{
+		// 		{Type: "int", Name: "fd"},
+		// 		{Type: "void*", Name: "buf"},
+		// 		{Type: "size_t", Name: "count"},
+		// 	},
+		// },
 		Open: {
 			ID32Bit: sys32open,
 			Name:    "open",
@@ -5881,6 +5886,21 @@ var Definitions = eventDefinitions{
 				{Type: "const char*", Name: "old_name"},
 				{Type: "const char*", Name: "new_name"},
 				{Type: "int", Name: "syscall"},
+			},
+		},
+		SysWrite: {
+			ID32Bit: sys32write,
+			Name:    "syswrite",
+			Syscall: true,
+			Sets:    []string{"syscalls", "fs", "fs_read_write"},
+			Probes: []probeDependency{
+				{Handle: probes.SysWrite, Required: true},
+			},
+			Params: []trace.ArgMeta{
+				{Type: "const char*", Name: "path"},
+				{Type: "u64", Name: "fd"},
+				{Type: "void*", Name: "buf"},
+				{Type: "size_t", Name: "count"},
 			},
 		},
 	},
