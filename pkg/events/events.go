@@ -3,14 +3,14 @@ package events
 import (
 	"github.com/aquasecurity/tracee/pkg/ebpf/probes"
 	"github.com/aquasecurity/tracee/types/trace"
-	"github.com/syndtr/gocapability/capability"
+	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
 type dependencies struct {
 	Events       []eventDependency // Events required to be loaded and/or submitted for the event to happen
 	KSymbols     []string
 	TailCalls    []TailCall
-	Capabilities []capability.Cap
+	Capabilities []cap.Value
 }
 
 type probeDependency struct {
@@ -91,7 +91,11 @@ type ID int32
 // Common events (used by all architectures)
 // events should match defined values in ebpf code
 const (
-	SysEnter ID = iota + 1000
+	NetPacket ID = iota + 700
+	DnsRequest
+	DnsResponse
+	MaxNetID
+	SysEnter
 	SysExit
 	SchedProcessFork
 	SchedProcessExec
@@ -145,7 +149,15 @@ const (
 	HookedProcFops
 	PrintNetSeqOps
 	TaskRename
-	MaxCommon
+	MaxCommonID
+	DebugNetSecurityBind
+	DebugNetUdpSendmsg
+	DebugNetUdpDisconnect
+	DebugNetUdpDestroySock
+	DebugNetUdpV6DestroySock
+	DebugNetInetSockSetState
+	DebugNetTcpConnect
+	MaxDebugID
 )
 
 // Events originated from user-space
@@ -161,35 +173,24 @@ const (
 
 const Unique32BitSyscallsStartID = 3000
 
+// Capture meta-events
 const (
-	NetPacket ID = iota + 4000
-	DnsRequest
-	DnsResponse
-	MaxNetID
-)
-
-const (
-	CaptureIface int32 = 1 << iota
-	TraceIface
-)
-
-const (
-	DebugNetSecurityBind ID = iota + 5000
-	DebugNetUdpSendmsg
-	DebugNetUdpDisconnect
-	DebugNetUdpDestroySock
-	DebugNetUdpV6DestroySock
-	DebugNetInetSockSetState
-	DebugNetTcpConnect
-)
-
-const (
-	CaptureFileWrite ID = iota + 6000
+	CaptureFileWrite ID = iota + 4000
 	CaptureExec
 	CaptureModule
 	CaptureMem
 	CaptureProfile
 	CapturePcap
+)
+
+const (
+	SysEvent ID = iota + 5000
+	SysWrite
+)
+
+const (
+	CaptureIface int32 = 1 << iota
+	TraceIface
 )
 
 var Definitions = eventDefinitions{
@@ -205,17 +206,17 @@ var Definitions = eventDefinitions{
 				{Type: "size_t", Name: "count"},
 			},
 		},
-		Write: {
-			ID32Bit: sys32write,
-			Name:    "write",
-			Syscall: true,
-			Sets:    []string{"syscalls", "fs", "fs_read_write"},
-			Params: []trace.ArgMeta{
-				{Type: "int", Name: "fd"},
-				{Type: "void*", Name: "buf"},
-				{Type: "size_t", Name: "count"},
-			},
-		},
+		// Write: {
+		// 	ID32Bit: sys32write,
+		// 	Name:    "write",
+		// 	Syscall: true,
+		// 	Sets:    []string{"syscalls", "fs", "fs_read_write"},
+		// 	Params: []trace.ArgMeta{
+		// 		{Type: "int", Name: "fd"},
+		// 		{Type: "void*", Name: "buf"},
+		// 		{Type: "size_t", Name: "count"},
+		// 	},
+		// },
 		Open: {
 			ID32Bit: sys32open,
 			Name:    "open",
@@ -774,7 +775,6 @@ var Definitions = eventDefinitions{
 		Setsockopt: {
 			ID32Bit: sys32setsockopt,
 			Name:    "setsockopt",
-			DocPath: "lsm_hooks/security_socket_setsockopt.md",
 			Syscall: true,
 			Sets:    []string{"syscalls", "net", "net_sock"},
 			Params: []trace.ArgMeta{
@@ -5227,6 +5227,7 @@ var Definitions = eventDefinitions{
 		SecuritySocketSetsockopt: {
 			ID32Bit: sys32undefined,
 			Name:    "security_socket_setsockopt",
+			DocPath: "lsm_hooks/security_socket_setsockopt.md",
 			Probes: []probeDependency{
 				{Handle: probes.SecuritySocketSetsockopt, Required: true},
 			},
@@ -5364,7 +5365,7 @@ var Definitions = eventDefinitions{
 			Name:    "init_namespaces",
 			Sets:    []string{},
 			Dependencies: dependencies{
-				Capabilities: []capability.Cap{capability.CAP_SYS_PTRACE},
+				Capabilities: []cap.Value{cap.SYS_PTRACE},
 			},
 			Params: []trace.ArgMeta{
 				{Type: "u32", Name: "cgroup"},
@@ -5482,6 +5483,11 @@ var Definitions = eventDefinitions{
 				{Type: "const char*", Name: "runtime"},
 				{Type: "const char*", Name: "container_id"},
 				{Type: "unsigned long", Name: "ctime"},
+				{Type: "const char*", Name: "container_image"},
+				{Type: "const char*", Name: "container_name"},
+				{Type: "const char*", Name: "pod_name"},
+				{Type: "const char*", Name: "pod_namespace"},
+				{Type: "const char*", Name: "pod_uid"},
 			},
 		},
 		NetPacket: {
@@ -5500,9 +5506,10 @@ var Definitions = eventDefinitions{
 				{Handle: probes.ICMPv6Send, Required: true},
 				{Handle: probes.Pingv4Sendmsg, Required: true},
 				{Handle: probes.Pingv6Sendmsg, Required: true},
+				{Handle: probes.SecuritySocketBind, Required: true},
 			},
 			Dependencies: dependencies{
-				Capabilities: []capability.Cap{capability.CAP_NET_ADMIN},
+				Capabilities: []cap.Value{cap.NET_ADMIN},
 			},
 			Sets: []string{"network_events"},
 			Params: []trace.ArgMeta{
@@ -5521,7 +5528,7 @@ var Definitions = eventDefinitions{
 				{Handle: probes.TCPConnect, Required: true},
 			},
 			Dependencies: dependencies{
-				Capabilities: []capability.Cap{capability.CAP_NET_ADMIN},
+				Capabilities: []cap.Value{cap.NET_ADMIN},
 			},
 			Sets: []string{"network_events"},
 			Params: []trace.ArgMeta{
@@ -5541,7 +5548,7 @@ var Definitions = eventDefinitions{
 				{Handle: probes.TCPConnect, Required: true},
 			},
 			Dependencies: dependencies{
-				Capabilities: []capability.Cap{capability.CAP_NET_ADMIN},
+				Capabilities: []cap.Value{cap.NET_ADMIN},
 			},
 			Sets: []string{"network_events"},
 			Params: []trace.ArgMeta{
@@ -5602,7 +5609,7 @@ var Definitions = eventDefinitions{
 				{Type: "u64", Name: "proc_ops_addr"},
 			},
 			Dependencies: dependencies{
-				Capabilities: []capability.Cap{capability.CAP_NET_ADMIN},
+				Capabilities: []cap.Value{cap.NET_ADMIN},
 			},
 		},
 		PrintSyscallTable: {
@@ -5713,7 +5720,8 @@ var Definitions = eventDefinitions{
 			Name:     "capture_exec",
 			Internal: true,
 			Dependencies: dependencies{
-				Events: []eventDependency{{EventID: SchedProcessExec}},
+				Events:       []eventDependency{{EventID: SchedProcessExec}},
+				Capabilities: []cap.Value{cap.SYS_PTRACE},
 			},
 		},
 		CaptureModule: {
@@ -5757,8 +5765,8 @@ var Definitions = eventDefinitions{
 			Name:     "capture_pcap",
 			Internal: true,
 			Dependencies: dependencies{
-				Events:       []eventDependency{{EventID: SecuritySocketBind}},
-				Capabilities: []capability.Cap{capability.CAP_SYS_ADMIN},
+				Events:       []eventDependency{{EventID: NetPacket}},
+				Capabilities: []cap.Value{cap.NET_ADMIN},
 			},
 		},
 		DoInitModule: {
@@ -5880,6 +5888,21 @@ var Definitions = eventDefinitions{
 				{Type: "const char*", Name: "old_name"},
 				{Type: "const char*", Name: "new_name"},
 				{Type: "int", Name: "syscall"},
+			},
+		},
+		SysWrite: {
+			ID32Bit: sys32write,
+			Name:    "syswrite",
+			Syscall: true,
+			Sets:    []string{"syscalls", "fs", "fs_read_write"},
+			Probes: []probeDependency{
+				{Handle: probes.SysWrite, Required: true},
+			},
+			Params: []trace.ArgMeta{
+				{Type: "const char*", Name: "path"},
+				{Type: "u64", Name: "fd"},
+				{Type: "void*", Name: "buf"},
+				{Type: "size_t", Name: "count"},
 			},
 		},
 	},

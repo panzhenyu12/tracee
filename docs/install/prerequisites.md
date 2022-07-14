@@ -34,8 +34,20 @@ capabilities:
 * `CAP_SETPCAP` (if given - used to reduce bounding set capabilities)
 * `CAP_SYSLOG` (to access kernel symbols through /proc/kallsyms)
 * On some environments (e.g. Ubuntu) `CAP_IPC_LOCK` might be required as well.
+* On cgroup v1 environments, `CAP_SYS_ADMIN` is recommended if running from a container in 
+order to allow tracee to mount the cpuset cgroup controller.
 
 > Alternatively, run as `root` or with the `--privileged` flag of Docker.
 
 [libbpf CO-RE documentation]: https://github.com/libbpf/libbpf#bpf-co-re-compile-once--run-everywhere
 [BTFHUB]: https://github.com/aquasecurity/btfhub-archive
+
+# Corner Cases
+
+## Drop Capabilities Error
+
+Tracee-ebpf and tracee-rules both try to reduce capabilities upon startup.
+Some environments won't allow capabilities dropping because of permission issues (for example - AWS Lambdas). It might be a result of seccomp filter for example, restricting syscalls access. 
+Failure in capabilities dropping will result tracee's exit with a matching error, to guarantee that tracee isn't running with excess capabilities without the user agreement.
+To allow tracee to run with high capabilities and prevent crushing, the `--allow-high-capabilities` flag can be used.
+For docker users, to allow tracee-ebpf high capabilities the environment variable `ALLOW_HIGH_CAPABILITIES=1` should be used.

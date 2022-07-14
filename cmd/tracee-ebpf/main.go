@@ -34,6 +34,10 @@ var enrich bool
 
 var version string
 
+const (
+	allowHighCapabilitiesFlag = "allow-high-capabilities"
+)
+
 func main() {
 	app := &cli.App{
 		Name:    "Tracee",
@@ -149,7 +153,7 @@ func main() {
 			cfg.Output = &output
 
 			// environment capabilities
-			err = ensureCapabilities(OSInfo, &cfg)
+			err = ensureCapabilities(OSInfo, &cfg, c.Bool(allowHighCapabilitiesFlag))
 			if err != nil {
 				return err
 			}
@@ -369,6 +373,12 @@ func main() {
 				Usage:       "enable container info enrichment to events. this feature is experimental and may cause unexpected behavior in the pipeline",
 				Destination: &enrich,
 			},
+			&cli.BoolFlag{
+				Name:    allowHighCapabilitiesFlag,
+				Aliases: []string{"ahc"},
+				Usage:   "allow tracee-ebpf to run with high capabilities, in case that capabilities dropping fails",
+				Value:   false,
+			},
 		},
 	}
 
@@ -548,11 +558,11 @@ func printList() {
 	var b strings.Builder
 	b.WriteString("System Calls: " + titleHeaderPadFirst + "Sets:" + titleHeaderPadSecond + "Arguments:\n")
 	b.WriteString("____________  " + titleHeaderPadFirst + "____ " + titleHeaderPadSecond + "_________" + "\n\n")
-	printEventGroup(&b, 0, events.SysEnter)
+	printEventGroup(&b, 0, events.MaxSyscallID)
 	printEventGroup(&b, events.Unique32BitSyscallsStartID, events.Unique32BitSyscallsEndID)
 	b.WriteString("\n\nOther Events: " + titleHeaderPadFirst + "Sets:" + titleHeaderPadSecond + "Arguments:\n")
 	b.WriteString("____________  " + titleHeaderPadFirst + "____ " + titleHeaderPadSecond + "_________\n\n")
-	printEventGroup(&b, events.SysEnter, events.MaxCommon)
+	printEventGroup(&b, events.SysEnter, events.MaxCommonID)
 	printEventGroup(&b, events.InitNamespaces, events.MaxUserSpace)
 	b.WriteString("\n\nNetwork Events: " + titleHeaderPadFirst + "Sets:" + titleHeaderPadSecond + "Arguments:\n")
 	b.WriteString("____________  " + titleHeaderPadFirst + "____ " + titleHeaderPadSecond + "_________\n\n")

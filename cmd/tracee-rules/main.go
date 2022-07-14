@@ -18,14 +18,15 @@ import (
 	"github.com/aquasecurity/tracee/types/detect"
 	"github.com/open-policy-agent/opa/compile"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/syndtr/gocapability/capability"
 	"github.com/urfave/cli/v2"
+	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
 const (
-	signatureBufferFlag = "sig-buffer"
-	metricsFlag         = "metrics"
-	metricsAddrFlag     = "metrics-addr"
+	signatureBufferFlag       = "sig-buffer"
+	metricsFlag               = "metrics"
+	metricsAddrFlag           = "metrics-addr"
+	allowHighCapabilitiesFlag = "allow-high-capabilities"
 )
 
 func main() {
@@ -35,7 +36,12 @@ func main() {
 		Action: func(c *cli.Context) error {
 			err := dropCapabilities()
 			if err != nil {
-				return err
+				if !c.Bool(allowHighCapabilitiesFlag) {
+					return fmt.Errorf("%w - to avoid this error use the --%s flag", err, allowHighCapabilitiesFlag)
+				} else {
+					fmt.Fprintf(os.Stdout, "Capabilities dropping failed - %v\n", err)
+					fmt.Fprintf(os.Stdout, "Continue with high capabilities according to the configuration\n")
+				}
 			}
 
 			if c.NumFlags() == 0 {
@@ -222,6 +228,12 @@ func main() {
 				Usage: "listening address of the metrics endpoint server",
 				Value: ":4466",
 			},
+			&cli.BoolFlag{
+				Name:    allowHighCapabilitiesFlag,
+				Aliases: []string{"ahc"},
+				Usage:   "allow tracee-rules to run with high capabilities, in case that capabilities dropping fails",
+				Value:   false,
+			},
 		},
 	}
 	err := app.Run(os.Args)
@@ -276,12 +288,7 @@ func sigHandler() chan bool {
 // dropCapabilities drop all capabilities from the process
 // The function also tries to drop the capabilities bounding set, but it won't work if CAP_SETPCAP is not available.
 func dropCapabilities() error {
-	selfCaps, err := capabilities.Self()
-	if err != nil {
-		return err
-	}
-
-	err = capabilities.DropUnrequired(selfCaps, []capability.Cap{})
+	err := capabilities.DropUnrequired([]cap.Value{})
 	if err != nil {
 		return err
 	}
